@@ -303,3 +303,69 @@ plot_data %>%
   ) %>%
   dplyr::pull(plots)
 ```
+
+4.  
+
+```{r}
+dir.create("plots", showWarnings = FALSE)
+```
+
+```{r}
+plot_list <- plot_data %>%
+  dplyr::group_by(district) %>%
+  dplyr::group_split() %>%
+  purrr::map(
+    ~ ggplot2::ggplot(.x, ggplot2::aes(x = academic_year, y = v, group = 1)) +
+      ggplot2::geom_hline(yintercept = 0, color = "red") +
+      ggplot2::geom_line(color = "gray80") +
+      ggplot2::geom_errorbar(
+        ggplot2::aes(
+          ymin = v - 1.96 * v_se,
+          ymax = v + 1.96 * v_se
+        ),
+        width = 0.2,
+        color = "gray50"
+      ) +
+      ggplot2::geom_point(
+        ggplot2::aes(color = direction),
+        size = 3
+      ) +
+      ggplot2::scale_color_manual(
+        values = c(
+          "White higher" = "pink",
+          "Hispanic/Latino higher" = "blue"
+        ),
+        guide = "none"
+      ) +
+      ggplot2::labs(
+        title = paste("Achievement Gap Estimates:", unique(.x$district)),
+        subtitle = "Negative values indicate White students have higher average achievement\nPositive values indicate Hispanic/Latino students have higher average achievement",
+        caption = paste("Note: District included", unique(.x$n_schools), "schools."),
+        x = "School year",
+        y = "Average achievement difference (SD units)"
+      ) +
+      ggplot2::theme_minimal()
+  )
+```
+
+```{r}
+district_names <- purrr::map_chr(
+  plot_data %>%
+    dplyr::group_by(district) %>%
+    dplyr::group_split(),
+  ~ unique(.x$district)
+)
+```
+
+```{r}
+purrr::walk2(
+  plot_list,
+  district_names,
+  ~ ggplot2::ggsave(
+    filename = glue::glue("plots/{janitor::make_clean_names(.y)}.png"),
+    plot = .x,
+    width = 8,
+    height = 5
+  )
+)
+```
