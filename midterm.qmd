@@ -13,6 +13,8 @@ library(glue)
 library(rio)
 library(dplyr)
 library(remotes)
+library(gapr)
+library(janitor)
 ```
 
 ```{r}
@@ -32,7 +34,7 @@ all_data <- dplyr::bind_rows(
   download_file(18)
 )
 
-View(all_data)
+#View(all_data)
 head(all_data)
 ```
 
@@ -73,7 +75,7 @@ head(clean_data)
 2.  
 
 ```{r}
-clean_data %>%
+d <- clean_data %>%
   dplyr::group_by(
     academic_year,
     district,
@@ -89,12 +91,215 @@ clean_data %>%
     names_from = student_group,
     values_from = n
   ) %>%
-  tidyr::drop_na(`Hispanic/Latino`, White)
+  janitor::clean_names() %>%
+  tidyr::drop_na(hispanic_latino, white)
+
+head(d)
 ```
 
 # **Part B: Achievement disparities**
 
 ```{r}
 #install.packages("remotes")
-install.packages("gapr")
+#remotes::install_github("datalorax/gapr")
+```
+
+```{r}
+d[1:4, ] |> # data source - just first four rows for first district
+  estimate_v("white", "hispanic_latino") # columns for reference/focal groups
+```
+
+1.  
+
+```{r}
+#using group_by() |> nest() |> map()
+usinggroup <- d %>%
+  dplyr::group_by(academic_year, district) %>%
+  tidyr::nest() %>%
+  dplyr::mutate(
+    results = purrr::map(
+      data,
+      ~ gapr::estimate_v(.x, "white", "hispanic_latino")
+    )
+  ) %>%
+  tidyr::unnest(results)
+
+```
+
+```{r}
+#using nest_by() |> summarize()
+
+usingnest <- d %>%
+  dplyr::nest_by(academic_year, district) %>%
+  dplyr::summarize(
+    gapr::estimate_v(data, "white", "hispanic_latino")
+  )
+```
+
+```{r}
+dplyr::left_join(
+  usinggroup,
+  usingnest,
+    by = c("academic_year", "district"),
+  suffix = c("_map", "_summarize")
+) %>%
+  ggplot2::ggplot(
+    ggplot2::aes(x = v_summarize, y = v_map)
+  ) +
+  ggplot2::geom_point(color = "grey70", size = 3) +
+  ggplot2::geom_abline(color = "skyblue", linewidth = 1.5) +
+  ggplot2::theme_minimal() +
+  ggplot2::labs(
+    x = "V (`nest_by() |> summarize()`)",
+    y = "V (`group_by() |> nest() |> mutate() |> map()`)"
+  )
+```
+
+```{r}
+distsricts <- unique(d$district)[1:100]
+
+plot_data <- usingnest %>%
+  dplyr::filter(district %in% distsricts)
+
+one_district <- distsricts[1]
+```
+
+```{r}
+plot_data %>%
+  dplyr::filter(district == one_district) %>%
+  dplyr::mutate(
+    direction = dplyr::if_else(
+      v < 0,
+      "White higher",
+      "Hispanic/Latino higher"
+    )
+  ) %>%
+  ggplot2::ggplot(
+    ggplot2::aes(x = academic_year, y = v, group = 1)
+  ) +
+  ggplot2::geom_hline(yintercept = 0, color = "red") +
+  ggplot2::geom_line(color = "gray80") +
+  ggplot2::geom_errorbar(
+    ggplot2::aes(
+      ymin = v - 1.96 * v_se,
+      ymax = v + 1.96 * v_se
+    ),
+    width = 0.2,
+    color = "gray50"
+  ) +
+  ggplot2::geom_point(
+    ggplot2::aes(color = direction),
+    size = 3
+  ) +
+  ggplot2::scale_color_manual(
+    values = c(
+      "White higher" = "pink",
+      "Hispanic/Latino higher" = "blue"
+    ),
+    guide = "none"
+  ) +
+  ggplot2::labs(
+    title = paste("Achievement Gap Estimates:", one_district),
+    subtitle = "Negative values indicate White students have higher average achievement\nPositive values indicate Hispanic/Latino students have higher average achievement",
+    x = "School year",
+    y = "Average achievement difference (SD units)"
+  ) +
+  ggplot2::theme_minimal()
+```
+
+```{r}
+districts <- unique(usingnest$district)[1:100]
+
+plot_data <- usingnest %>%
+  dplyr::filter(district %in% districts)
+```
+
+```{r}
+plot_data <- usingnest %>%
+  dplyr::filter(district %in% districts) %>%
+  dplyr::mutate(
+    direction = dplyr::if_else(
+      v < 0,
+      "White higher",
+      "Hispanic/Latino higher"
+    )
+  )
+
+plot_data %>%
+  dplyr::group_by(district) %>%
+  dplyr::group_split() %>%
+  purrr::map(
+    ~ ggplot2::ggplot(.x, ggplot2::aes(x = academic_year, y = v, group = 1)) +
+      ggplot2::geom_hline(yintercept = 0, color = "red") +
+      ggplot2::geom_line(color = "gray80") +
+      ggplot2::geom_errorbar(
+        ggplot2::aes(
+          ymin = v - 1.96 * v_se,
+          ymax = v + 1.96 * v_se
+        ),
+        width = 0.2,
+        color = "gray50"
+      ) +
+      ggplot2::geom_point(
+        ggplot2::aes(color = direction),
+        size = 3
+      ) +
+      ggplot2::scale_color_manual(
+        values = c(
+          "White higher" = "pink",
+          "Hispanic/Latino higher" = "blue"
+        ),
+        guide = "none"
+      ) +
+      ggplot2::labs(
+        title = paste("Achievement Gap Estimates:", unique(.x$district)),
+        subtitle = "Negative values indicate White students have higher average achievement\nPositive values indicate Hispanic/Latino students have higher average achievement",
+        caption = paste("Note: District included", unique(.x$n_schools), "schools."),
+        x = "School year",
+        y = "Average achievement difference (SD units)"
+      ) +
+      ggplot2::theme_minimal()
+  )
+```
+
+```{r}
+plot_data %>%
+  dplyr::group_by(district) %>%
+  tidyr::nest() %>%
+  dplyr::mutate(
+    plots = purrr::map(
+      data,
+      ~ ggplot2::ggplot(.x, ggplot2::aes(x = academic_year, y = v, group = 1)) +
+        ggplot2::geom_hline(yintercept = 0, color = "red") +
+        ggplot2::geom_line(color = "gray80") +
+        ggplot2::geom_errorbar(
+          ggplot2::aes(
+            ymin = v - 1.96 * v_se,
+            ymax = v + 1.96 * v_se
+          ),
+          width = 0.2,
+          color = "gray50"
+        ) +
+        ggplot2::geom_point(
+          ggplot2::aes(color = direction),
+          size = 3
+        ) +
+        ggplot2::scale_color_manual(
+          values = c(
+            "White higher" = "pink",
+            "Hispanic/Latino higher" = "blue"
+          ),
+          guide = "none"
+        ) +
+        ggplot2::labs(
+          title = paste("Achievement Gap Estimates:", unique(.x$district)),
+          subtitle = "Negative values indicate White students have higher average achievement\nPositive values indicate Hispanic/Latino students have higher average achievement",
+          caption = paste("Note: District included", unique(.x$n_schools), "schools."),
+          x = "School year",
+          y = "Average achievement difference (SD units)"
+        ) +
+        ggplot2::theme_minimal()
+    )
+  ) %>%
+  dplyr::pull(plots)
 ```
