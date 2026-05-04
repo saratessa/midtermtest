@@ -6,4 +6,95 @@ format:
 editor: visual
 ---
 
-## 
+## Part A: Data 
+
+```{r}
+library(glue)
+library(rio)
+library(dplyr)
+library(remotes)
+```
+
+```{r}
+download_file <- function(year) {
+  link <- glue::glue("https://www.oregon.gov/ode/educator-resources/assessment/TestResults20{year}/pagr_schools_ela_raceethnicity_{year-1}{year}.xlsx")
+  rio::import(link, setclass = "tibble", na = c("-", "--", "*"))
+}
+```
+
+1.  
+
+```{r}
+all_data <- dplyr::bind_rows(
+  download_file(15),
+  download_file(16),
+  download_file(17),
+  download_file(18)
+)
+
+View(all_data)
+head(all_data)
+```
+
+```{r}
+clean_data <- all_data %>%
+  dplyr::filter(`Student Group` %in% c("White", "Hispanic/Latino")) %>%
+  dplyr::select(
+    academic_year = `Academic Year`,
+    district = District,
+    school = School,
+    student_group = `Student Group`,
+    grade_level = `Grade Level`,
+    `Number Level 1`,
+    `Number Level 2`,
+    `Number Level 3`,
+    `Number Level 4`
+  ) %>%
+  tidyr::pivot_longer(
+    cols = dplyr::starts_with("Number Level"),
+    names_to = "level",
+    values_to = "n"
+  ) %>%
+  dplyr::mutate(
+    level = stringr::str_remove(level, "Number Level ")
+  ) %>%
+  tidyr::drop_na(n)
+```
+
+```{r}
+names(all_data)
+
+```
+
+```{r}
+head(clean_data)
+```
+
+2.  
+
+```{r}
+clean_data %>%
+  dplyr::group_by(
+    academic_year,
+    district,
+    student_group,
+    level
+  ) %>%
+  dplyr::summarize(
+    n = sum(n),
+    n_schools = dplyr::n_distinct(school),
+    .groups = "drop"
+  ) %>%
+  tidyr::pivot_wider(
+    names_from = student_group,
+    values_from = n
+  ) %>%
+  tidyr::drop_na(`Hispanic/Latino`, White)
+```
+
+# **Part B: Achievement disparities**
+
+```{r}
+#install.packages("remotes")
+install.packages("gapr")
+```
